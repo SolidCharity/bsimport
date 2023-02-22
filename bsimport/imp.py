@@ -136,8 +136,9 @@ class Importer():
         sq3.execute("""
             CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            src_id INTEGER,
-            bs_id INTEGER)""")
+            src_page_id INTEGER,
+            bs_page_id INTEGER,
+            bs_book_id INTEGER)""")
         sq3.commit()
         return sq3
 
@@ -177,7 +178,7 @@ class Importer():
 
     def get_or_create_page(self, sq3, bs_book_id, src_page_id, page_title):
         cursor = sq3.cursor()
-        cursor.execute("SELECT bs_id FROM pages WHERE src_id = ?", (src_page_id,))
+        cursor.execute("SELECT bs_page_id FROM pages WHERE src_page_id = ? AND bs_book_id = ?", (src_page_id, bs_book_id))
         row = cursor.fetchone()
         if row is not None:
             return row[0]
@@ -192,12 +193,12 @@ class Importer():
             print(f"Create page failed with: {error}")
             raise Exception(error)
 
-        bs_id = data
+        bs_page_id = data
 
-        cursor.execute("INSERT INTO pages(src_id, bs_id) VALUES(?,?)", (src_page_id,bs_id,))
+        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id) VALUES(?,?,?)", (src_page_id,bs_page_id,bs_book_id))
         sq3.commit()
 
-        return bs_id
+        return bs_page_id
 
 
     def import_doc(
@@ -219,7 +220,7 @@ class Importer():
             WHERE resource_page_id = %s""", (src_page_id,))
 
         row = c.fetchone()
-        first_book = True
+        first_book_page_id = None
         while row is not None:
             print(row)
 
@@ -228,22 +229,77 @@ class Importer():
 
             page_title = file_path.stem
 
-            if first_book:
-                # has this page already been imported?
-                bs_page_id = self.get_or_create_page(sq3, bs_book_id, src_page_id, page_title)
+            bs_page_id = self.get_or_create_page(sq3, bs_book_id, src_page_id, page_title)
+
+            if first_book_page_id is None:
                 error, msg = self.import_page(file_path, book_id=bs_book_id, page_id=bs_page_id)
                 if error:
                     return IResponse(error, msg)
+                first_book_page_id = bs_page_id
 
             else:
-                # TODO: create a page with a reference
+                # create a page with a reference
                 # see https://www.bookstackapp.com/docs/user/reusing-page-content/
-                None
+                error, msg = self.import_page_text(page_title, "{{@" + str(first_book_page_id) + "}}", None, book_id=bs_book_id, page_id=bs_page_id)
+                if error:
+                    return IResponse(error, msg)
 
             row = c.fetchone()
-            first_book = False
 
         return IResponse(SUCCESS, "")
+
+    def import_page_text(
+        self,
+        name: str,
+        text: str,
+        tags: Optional[List[Dict[str, str]]] = None,
+        book_id: Optional[int] = -1,
+        chapter_id: Optional[int] = -1,
+        page_id: Optional[int] = -1,
+    ) -> IResponse:
+        """
+        import the given text as a page.
+
+        :param text:
+            The text to import.
+        :type text: str
+
+        :param book_id:
+            The ID of the book the page will be attached to.
+            Required without `chapter_id`.
+        :type book_id: Optional[int]
+        :param chapter_id:
+            The ID of the chapter the page will be attached to.
+            Required without `book_id`.
+        :type chapter_id: Optional[int]
+
+        :return:
+            An error code.
+        :rtype: int
+        :return:
+            The name of the page if successful, the error message otherwise.
+        :rtype: str
+        """
+
+        if page_id != -1:
+            # update existing page
+            error, msg = self._wrapper.update_page(
+                book_id, page_id, name, text, tags
+            )
+        elif book_id != -1:
+            error, msg = self._wrapper.create_page(
+                name, text, tags, book_id=book_id
+            )
+        else:
+            error, msg = self._wrapper.create_page(
+                name, text, tags, chapter_id=chapter_id
+            )
+
+        if error:
+            return IResponse(error, msg)
+        else:
+            return IResponse(SUCCESS, name)
+
 
     def import_page(
         self,
@@ -293,24 +349,8 @@ class Importer():
         if not tags:
             tags = None
 
-        if page_id != -1:
-            # update existing page
-            error, msg = self._wrapper.update_page(
-                book_id, page_id, name, text, tags
-            )
-        elif book_id != -1:
-            error, msg = self._wrapper.create_page(
-                name, text, tags, book_id=book_id
-            )
-        else:
-            error, msg = self._wrapper.create_page(
-                name, text, tags, chapter_id=chapter_id
-            )
+        return self.import_page_text(name, text, tags, book_id, chapter_id, page_id)
 
-        if error:
-            return IResponse(error, msg)
-        else:
-            return IResponse(SUCCESS, name)
 
     def import_chapter(
         self,
