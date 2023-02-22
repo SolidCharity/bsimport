@@ -153,7 +153,7 @@ def import_custom(importer: imp.Importer, path: Path):
     for child in Path(path, "docs").iterdir():
 
         if child.is_file() and child.suffix == '.md':
-            error, msg = importer.import_doc(child)
+            error, msg = importer.import_doc(path, child)
 
             if error:
                 typer.secho(

@@ -2,7 +2,9 @@
 # bsimport/wrapper.py
 
 import requests
+import base64
 
+from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from bsimport import (
@@ -167,7 +169,7 @@ class Bookstack():
         tags: Optional[List[Dict[str, str]]] = None,
         book_id: Optional[int] = -1,
         chapter_id: Optional[int] = -1
-    ):
+    ) -> BResponse:
 
         if len(name) > 255:
             return BResponse(NAME_TOO_LONG_ERROR, "")
@@ -224,8 +226,6 @@ class Bookstack():
         else:
             return BResponse(REQUEST_ERROR, response.json()['error'])
 
-
-
     def _update_shelf(
         self,
         id: int,
@@ -267,3 +267,38 @@ class Bookstack():
             return BResponse(SUCCESS, j.get('data', []))
         else:
             return BResponse(REQUEST_ERROR, j['error'])
+
+    def create_attachment(
+        self,
+        name: str,
+        file_path: Path,
+        page_id: int
+    ) -> BResponse:
+        """
+        upload attachment for a page
+        """
+
+        if name is None:
+            name = file_path.name
+        if len(name) > 255:
+            return BResponse(NAME_TOO_LONG_ERROR, "")
+
+        fh = open(file_path, 'rb')
+        content = bytearray(fh.read())
+
+        url = f"{self._url}/attachments"
+        data = {
+            'name': name,
+            'uploaded_to': page_id,
+        }
+        file = {'file': content}
+
+        # see https://github.com/BookStackApp/BookStack/blob/development/app/Http/Controllers/Api/AttachmentApiController.php#L44
+        response = requests.post(url, files=file, data=data, headers=self._header)
+
+        j = response.json()
+        if response.status_code == requests.codes.ok:
+            id = j.get('id', -1)
+            return BResponse(SUCCESS, id)
+        else:
+            return BResponse(REQUEST_ERROR, response.json()['error'])

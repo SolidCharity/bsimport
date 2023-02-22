@@ -201,8 +201,32 @@ class Importer():
         return bs_page_id
 
 
+    def import_attachments(
+        self,
+        path: Path,
+        bs_page_id: int,
+    ) -> IResponse:
+        """
+        import attachments and images for the given page from the given directory
+        """
+
+        if not path.exists():
+            return IResponse(SUCCESS, "")
+
+        for child in path.iterdir():
+            if child.is_file():
+                error, msg = self._wrapper.create_attachment(
+                    child.name, child, bs_page_id)
+
+                if error:
+                    return IResponse(error, msg)
+
+        return IResponse(SUCCESS, "")
+
+
     def import_doc(
         self,
+        import_path: Path,
         file_path: Path
     ) -> IResponse:
         """
@@ -232,10 +256,15 @@ class Importer():
             bs_page_id = self.get_or_create_page(sq3, bs_book_id, src_page_id, page_title)
 
             if first_book_page_id is None:
+                first_book_page_id = bs_page_id
+
                 error, msg = self.import_page(file_path, book_id=bs_book_id, page_id=bs_page_id)
                 if error:
                     return IResponse(error, msg)
-                first_book_page_id = bs_page_id
+
+                error, msg = self.import_attachments(Path(import_path, "images", str(src_page_id)), bs_page_id)
+                if error:
+                    return IResponse(error, msg)
 
             else:
                 # create a page with a reference
