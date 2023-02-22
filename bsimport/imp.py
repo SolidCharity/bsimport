@@ -113,7 +113,8 @@ class Importer():
             if line.startswith('# '):
                 name = line.rstrip()
                 name = name.lstrip('# ')
-            if line.startswith('## ') and text_start == -1:
+            #if line.startswith('## ') and text_start == -1:
+            elif text_start == -1:
                 text_start = count + start
                 break
 
