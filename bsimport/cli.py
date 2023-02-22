@@ -137,6 +137,32 @@ def modify(
         fg=typer.colors.GREEN
     )
 
+def import_custom(importer: imp.Importer, path: Path):
+    """
+    import multiple pages and books, based on a mysql database
+
+    :param importer:
+        The Importer to use.
+    :type importer: imp.Importer
+    :param path:
+        The path to the directory, that contains the subdirectories docs, files and images.
+    :type path: Path
+    """
+
+    # go through all docs
+    for child in Path(path, "docs").iterdir():
+
+        if child.is_file() and child.suffix == '.md':
+            error, msg = importer.import_doc(child)
+
+            if error:
+                typer.secho(
+                    f"Import file failed with: {ERRORS[error]}",
+                    fg=typer.colors.RED
+                )
+                typer.secho(f"Debug: {msg}")
+                raise typer.Exit(error)
+
 
 def import_single_file(importer: imp.Importer, path: Path):
     """
@@ -410,7 +436,8 @@ def import_from(
 
     if path.is_dir():
         typer.secho("Directory detected, importing as book.")
-        import_dir(importer, path)
+        import_custom(importer, path)
+        #import_dir(importer, path)
 
     elif path.is_file():
         typer.secho("File detected, importing as page.")

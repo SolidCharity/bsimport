@@ -188,10 +188,43 @@ class Bookstack():
 
         response = requests.post(url, json=page, headers=self._header)
 
+        j = response.json()
         if response.status_code == requests.codes.ok:
-            return BResponse(SUCCESS, "")
+            id = j.get('id', -1)
+            return BResponse(SUCCESS, id)
         else:
             return BResponse(REQUEST_ERROR, response.json()['error'])
+
+
+    def update_page(
+        self,
+        book_id: int,
+        page_id: int,
+        name: str,
+        text: str,
+        tags: Optional[List[Dict[str, str]]] = None
+    ) -> BResponse:
+        """
+        Updated the page.
+
+        :return:
+            [description]
+        :rtype: BResponse
+        """
+
+        url = f"{self._url}/pages/{page_id}"
+        data = {'book_id': book_id, 'name': name, 'markdown': text}
+
+        response = requests.put(url, data=data, headers=self._header)
+
+        j = response.json()
+        if response.status_code == requests.codes.ok:
+            id = j.get('id', -1)
+            return BResponse(SUCCESS, id)
+        else:
+            return BResponse(REQUEST_ERROR, response.json()['error'])
+
+
 
     def _update_shelf(
         self,

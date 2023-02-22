@@ -7,6 +7,10 @@ from bsimport import EMPTY_FILE_ERROR, FILE_READ_ERROR, SUCCESS
 
 from bsimport.wrapper import Bookstack
 
+import sqlite3
+import MySQLdb
+import configparser
+
 
 class IResponse(NamedTuple):
     """
@@ -122,11 +126,131 @@ class Importer():
 
         return name, text, tags
 
+    def connect_sqlite(self):
+        sq3 = sqlite3.connect('bsimport.sqlite3')
+        sq3.execute("""
+            CREATE TABLE IF NOT EXISTS books (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            src_id INTEGER,
+            bs_id INTEGER)""")
+        sq3.execute("""
+            CREATE TABLE IF NOT EXISTS pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            src_id INTEGER,
+            bs_id INTEGER)""")
+        sq3.commit()
+        return sq3
+
+
+    def connect_mysql(self):
+        config = configparser.ConfigParser()
+        path_my_cfg = str(Path(Path.home(), ".my.cnf"))
+        config.read(path_my_cfg)
+
+        mydb=MySQLdb.connect(database = config['mysql']['database'], read_default_file=path_my_cfg)
+        return mydb
+
+
+    def get_or_create_book(self, sq3, src_book_id):
+
+        cursor = sq3.cursor()
+        cursor.execute("SELECT bs_id FROM books WHERE src_id = ?", (src_book_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            return row[0]
+
+        # create a new book
+        # TODO: get the title of the book
+        error, data = self.create_book(str(src_book_id))
+
+        if error:
+            print(f"Create book failed with: {error}")
+            raise Exception(error)
+
+        bs_id = data
+
+        cursor.execute("INSERT INTO books(src_id, bs_id) VALUES(?,?)", (src_book_id,bs_id,))
+        sq3.commit()
+
+        return bs_id
+
+
+    def get_or_create_page(self, sq3, bs_book_id, src_page_id, page_title):
+        cursor = sq3.cursor()
+        cursor.execute("SELECT bs_id FROM pages WHERE src_id = ?", (src_page_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            return row[0]
+
+        # create a new page
+        tags = None
+        error, data = self._wrapper.create_page(
+            page_title, "EMPTY", tags, book_id=bs_book_id
+        )
+
+        if error:
+            print(f"Create page failed with: {error}")
+            raise Exception(error)
+
+        bs_id = data
+
+        cursor.execute("INSERT INTO pages(src_id, bs_id) VALUES(?,?)", (src_page_id,bs_id,))
+        sq3.commit()
+
+        return bs_id
+
+
+    def import_doc(
+        self,
+        file_path: Path
+    ) -> IResponse:
+        """
+        import a document, and get information from the source mysql database about which book this page belongs to
+        """
+
+        mydb = self.connect_mysql()
+        sq3 = self.connect_sqlite()
+
+        src_page_id = int(file_path.name[0:file_path.name.index('-')])
+        print(src_page_id, file_path)
+
+        c=mydb.cursor()
+        c.execute("""SELECT resource_book_id FROM resource_book_page
+            WHERE resource_page_id = %s""", (src_page_id,))
+
+        row = c.fetchone()
+        first_book = True
+        while row is not None:
+            print(row)
+
+            # does this book already exist?
+            bs_book_id = self.get_or_create_book(sq3, row[0])
+
+            page_title = file_path.stem
+
+            if first_book:
+                # has this page already been imported?
+                bs_page_id = self.get_or_create_page(sq3, bs_book_id, src_page_id, page_title)
+                error, msg = self.import_page(file_path, book_id=bs_book_id, page_id=bs_page_id)
+                if error:
+                    return IResponse(error, msg)
+
+            else:
+                # TODO: create a page with a reference
+                # see https://www.bookstackapp.com/docs/user/reusing-page-content/
+                None
+
+            row = c.fetchone()
+            first_book = False
+
+        return IResponse(SUCCESS, "")
+
     def import_page(
         self,
         file_path: Path,
         book_id: Optional[int] = -1,
-        chapter_id: Optional[int] = -1
+        chapter_id: Optional[int] = -1,
+        page_id: Optional[int] = -1,
     ) -> IResponse:
         """
         Parse a Markdown file and import it as a page.
@@ -169,7 +293,12 @@ class Importer():
         if not tags:
             tags = None
 
-        if book_id != -1:
+        if page_id != -1:
+            # update existing page
+            error, msg = self._wrapper.update_page(
+                book_id, page_id, name, text, tags
+            )
+        elif book_id != -1:
             error, msg = self._wrapper.create_page(
                 name, text, tags, book_id=book_id
             )
@@ -239,6 +368,35 @@ class Importer():
         """
 
         name = path.stem
+
+        # description = None
+        # tags = None
+
+        error, data = self._wrapper.create_book(name)
+
+        if error:
+            return IResponse(error, data)
+        else:
+            book_id = data
+            return IResponse(SUCCESS, book_id)
+
+    def create_book(
+        self,
+        name
+    ) -> IResponse:
+        """
+        Create a book.
+
+        :param name:
+            The name of the book
+
+        :return:
+            An error code.
+        :rtype: int
+        :return:
+            The book's ID if successful, the error message otherwise.
+        :rtype: Union[int, str]
+        """
 
         # description = None
         # tags = None

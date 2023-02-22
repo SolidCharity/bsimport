@@ -11,3 +11,5 @@ dist/
 bsimport.egg-info/
 # secrets
 .env
+# sqlite database
+*.sqlite3
