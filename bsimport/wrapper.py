@@ -2,7 +2,6 @@
 # bsimport/wrapper.py
 
 import requests
-import base64
 
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional

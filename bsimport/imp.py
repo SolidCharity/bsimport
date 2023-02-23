@@ -9,6 +9,7 @@ from bsimport.wrapper import Bookstack
 
 import sqlite3
 import MySQLdb
+import base64
 import configparser
 
 
@@ -258,11 +259,12 @@ class Importer():
             if first_book_page_id is None:
                 first_book_page_id = bs_page_id
 
-                error, msg = self.import_page(file_path, book_id=bs_book_id, page_id=bs_page_id)
+                error, msg = self.import_page(file_path, Path(import_path, "images", str(src_page_id)),
+                    book_id=bs_book_id, page_id=bs_page_id, src_page_id=src_page_id)
                 if error:
                     return IResponse(error, msg)
 
-                error, msg = self.import_attachments(Path(import_path, "images", str(src_page_id)), bs_page_id)
+                error, msg = self.import_attachments(Path(import_path, "files", str(src_page_id)), bs_page_id)
                 if error:
                     return IResponse(error, msg)
 
@@ -333,8 +335,10 @@ class Importer():
     def import_page(
         self,
         file_path: Path,
+        images_path: Path,
         book_id: Optional[int] = -1,
         chapter_id: Optional[int] = -1,
+        src_page_id: Optional[int] = -1,
         page_id: Optional[int] = -1,
     ) -> IResponse:
         """
@@ -371,6 +375,20 @@ class Importer():
             return IResponse(EMPTY_FILE_ERROR, "")
 
         name, text, tags = self._parse_file(content)
+
+        # embed images
+        # Any images included via base64 data URIs will be extracted and saved as gallery images against the page during upload.
+        if images_path.exists():
+            for child in images_path.iterdir():
+                if child.is_file() and child.name.startswith(str(src_page_id) + '-'):
+                    fh = open(child, 'rb')
+                    content = bytearray(fh.read())
+                    encoded = base64.b64encode(content).decode('ascii')
+                    #text = text.replace(child.name, f'<img src="data:image/{child.suffix};base64, {encoded}" alt="{child.name}"/>')
+                    extension = child.suffix.replace('.', '')
+                    image = f'(data:image/{extension};base64,{encoded})'
+                    text = text.replace(f"(../images/{src_page_id}/{child.name})",f"{image}")
+                    #<img src="data:image/{child.suffix};base64, {encoded}" alt="{child.name}"/>'
 
         if not name:
             name = file_path.stem
