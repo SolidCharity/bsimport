@@ -133,13 +133,16 @@ class Importer():
             CREATE TABLE IF NOT EXISTS books (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             src_id INTEGER,
-            bs_id INTEGER)""")
+            bs_id INTEGER,
+            bs_slug VARCHAR)""")
         sq3.execute("""
             CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             src_page_id INTEGER,
             bs_page_id INTEGER,
-            bs_book_id INTEGER)""")
+            bs_book_id INTEGER,
+            bs_book_slug VARCHAR,
+            bs_page_slug VARCHAR)""")
         sq3.execute("""
             CREATE TABLE IF NOT EXISTS attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,10 +164,10 @@ class Importer():
     def get_or_create_book(self, sq3, src_book_id):
 
         cursor = sq3.cursor()
-        cursor.execute("SELECT bs_id FROM books WHERE src_id = ?", (src_book_id,))
+        cursor.execute("SELECT bs_id, bs_slug FROM books WHERE src_id = ?", (src_book_id,))
         row = cursor.fetchone()
         if row is not None:
-            return row[0]
+            return (row[0], row[1])
 
         # create a new book
         # TODO: get the title of the book
@@ -175,14 +178,15 @@ class Importer():
             raise Exception(error)
 
         bs_id = data
+        bs_slug = str(src_book_id)
 
-        cursor.execute("INSERT INTO books(src_id, bs_id) VALUES(?,?)", (src_book_id,bs_id,))
+        cursor.execute("INSERT INTO books(src_id, bs_id, bs_slug) VALUES(?,?,?)", (src_book_id,bs_id,bs_slug,))
         sq3.commit()
 
-        return bs_id
+        return (bs_id, bs_slug)
 
 
-    def get_or_create_page(self, sq3, bs_book_id, src_page_id, page_title):
+    def get_or_create_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, page_title):
         cursor = sq3.cursor()
         cursor.execute("SELECT bs_page_id FROM pages WHERE src_page_id = ? AND bs_book_id = ?", (src_page_id, bs_book_id))
         row = cursor.fetchone()
@@ -200,8 +204,10 @@ class Importer():
             raise Exception(error)
 
         bs_page_id = data
+        bs_page_slug = page_title
 
-        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id) VALUES(?,?,?)", (src_page_id,bs_page_id,bs_book_id))
+        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug) VALUES(?,?,?,?,?)",
+            (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug))
         sq3.commit()
 
         return bs_page_id
@@ -265,16 +271,16 @@ class Importer():
             print(row)
 
             # does this book already exist?
-            bs_book_id = self.get_or_create_book(sq3, row[0])
+            (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, row[0])
 
             page_title = file_path.stem
 
-            bs_page_id = self.get_or_create_page(sq3, bs_book_id, src_page_id, page_title)
+            bs_page_id = self.get_or_create_page(sq3, bs_book_id, bs_book_slug, src_page_id, page_title)
 
             if first_book_page_id is None:
                 first_book_page_id = bs_page_id
 
-                error, msg = self.import_page(file_path, Path(import_path, "images", str(src_page_id)),
+                error, msg = self.import_page(sq3, file_path, Path(import_path, "images", str(src_page_id)),
                     book_id=bs_book_id, page_id=bs_page_id, src_page_id=src_page_id)
                 if error:
                     return IResponse(error, msg)
@@ -349,6 +355,7 @@ class Importer():
 
     def import_page(
         self,
+        sq3,
         file_path: Path,
         images_path: Path,
         book_id: Optional[int] = -1,
@@ -399,11 +406,27 @@ class Importer():
                     fh = open(child, 'rb')
                     content = bytearray(fh.read())
                     encoded = base64.b64encode(content).decode('ascii')
-                    #text = text.replace(child.name, f'<img src="data:image/{child.suffix};base64, {encoded}" alt="{child.name}"/>')
                     extension = child.suffix.replace('.', '')
                     image = f'(data:image/{extension};base64,{encoded})'
                     text = text.replace(f"(../images/{src_page_id}/{child.name})",f"{image}")
-                    #<img src="data:image/{child.suffix};base64, {encoded}" alt="{child.name}"/>'
+
+        # update internal links, even between books
+        # (../docs/123-my-page-title)
+        pos = 0
+        while '(../docs/' in text[pos:]:
+            pos += text[pos:].index('(../docs/') + len('(../docs/')
+            target = text[pos:]
+            target = target[0:target.index(')')]
+            target_page_id = int(target[0:target.index('-')])
+
+            # this page belongs to which book?
+            cursor = sq3.cursor()
+            cursor.execute("SELECT bs_book_slug, bs_page_slug FROM pages WHERE src_page_id = ?", (target_page_id,))
+            row = cursor.fetchone()
+            if row is not None:
+                bs_book_slug = row[0]
+                bs_page_slug = row[1]
+                text = text.replace(f'(../docs/{target})', f'(/books/{bs_book_slug}/page/{bs_page_slug})')
 
         if not name:
             name = file_path.stem
