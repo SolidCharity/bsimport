@@ -147,7 +147,8 @@ class Importer():
             CREATE TABLE IF NOT EXISTS attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename VARCHAR,
-            bs_page_id INTEGER)""")
+            bs_page_id INTEGER,
+            bs_att_id INTEGER)""")
         sq3.commit()
         return sq3
 
@@ -234,13 +235,14 @@ class Importer():
                 if row is not None:
                     continue
 
-                error, msg = self._wrapper.create_attachment(
+                error, data = self._wrapper.create_attachment(
                     child.name, child, bs_page_id)
 
                 if error:
-                    return IResponse(error, msg)
+                    return IResponse(error, data)
 
-                cursor.execute("INSERT INTO attachments(filename, bs_page_id) VALUES(?,?)", (child.name,bs_page_id,))
+                bs_att_id = data
+                cursor.execute("INSERT INTO attachments(filename, bs_page_id, bs_att_id) VALUES(?,?,?)", (child.name,bs_page_id,bs_att_id))
                 sq3.commit()
 
         return IResponse(SUCCESS, "")
@@ -427,6 +429,25 @@ class Importer():
                 bs_book_slug = row[0]
                 bs_page_slug = row[1]
                 text = text.replace(f'(../docs/{target})', f'(/books/{bs_book_slug}/page/{bs_page_slug})')
+
+        # update links to attachments
+        # (../files/465/456-my-document.pdf)
+        pos = 0
+        while '(../files/' in text[pos:]:
+            pos += text[pos:].index('(../files/') + len('(../files/')
+            target = text[pos:]
+            target = target[0:target.index(')')]
+            filename = target[target.index('/') + 1:]
+
+            # get the id of the attachment
+            cursor = sq3.cursor()
+            print(target)
+            cursor.execute("SELECT bs_att_id FROM attachments WHERE filename = ?", (filename,))
+            row = cursor.fetchone()
+            if row is not None:
+                bs_att_id = row[0]
+                print(bs_att_id)
+                text = text.replace(f'(../files/{target})', f'(/attachments/{bs_att_id})')
 
         if not name:
             name = file_path.stem
