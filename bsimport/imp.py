@@ -187,31 +187,21 @@ class Importer():
         return (bs_id, bs_slug)
 
 
-    def get_or_create_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, page_title):
+    def get_page(self, sq3, bs_book_id, src_page_id):
         cursor = sq3.cursor()
         cursor.execute("SELECT bs_page_id FROM pages WHERE src_page_id = ? AND bs_book_id = ?", (src_page_id, bs_book_id))
         row = cursor.fetchone()
         if row is not None:
             return row[0]
 
-        # create a new page
-        tags = None
-        error, data = self._wrapper.create_page(
-            page_title, "EMPTY", tags, book_id=bs_book_id
-        )
+        return -1
 
-        if error:
-            print(f"Create page failed with: {error}")
-            raise Exception(error)
 
-        bs_page_id = data
-        bs_page_slug = page_title
-
+    def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, bs_page_id, bs_page_slug):
+        cursor = sq3.cursor()
         cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug) VALUES(?,?,?,?,?)",
             (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug))
         sq3.commit()
-
-        return bs_page_id
 
 
     def import_attachments(
@@ -277,15 +267,16 @@ class Importer():
 
             page_title = file_path.stem
 
-            bs_page_id = self.get_or_create_page(sq3, bs_book_id, bs_book_slug, src_page_id, page_title)
+            bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
 
             if first_book_page_id is None:
-                first_book_page_id = bs_page_id
 
                 error, msg = self.import_page(sq3, file_path, Path(import_path, "images", str(src_page_id)),
-                    book_id=bs_book_id, page_id=bs_page_id, src_page_id=src_page_id)
+                    book_id=bs_book_id, page_id=bs_page_id, src_page_id=src_page_id, page_slug=page_title)
                 if error:
                     return IResponse(error, msg)
+                bs_page_id = msg
+                first_book_page_id = bs_page_id
 
                 error, msg = self.import_attachments(sq3, Path(import_path, "files", str(src_page_id)), bs_page_id)
                 if error:
@@ -294,7 +285,12 @@ class Importer():
             else:
                 # create a page with a reference
                 # see https://www.bookstackapp.com/docs/user/reusing-page-content/
-                error, msg = self.import_page_text(page_title, "{{@" + str(first_book_page_id) + "}}", None, book_id=bs_book_id, page_id=bs_page_id)
+                error, msg = self.import_page_text(sq3, page_title, "{{@" + str(first_book_page_id) + "}}", None,
+                    book_id=bs_book_id,
+                    page_id=bs_page_id,
+                    src_page_id = src_page_id,
+                    book_slug = bs_book_slug,
+                    page_slug = page_title)
                 if error:
                     return IResponse(error, msg)
 
@@ -304,12 +300,16 @@ class Importer():
 
     def import_page_text(
         self,
+        sq3,
         name: str,
         text: str,
         tags: Optional[List[Dict[str, str]]] = None,
         book_id: Optional[int] = -1,
         chapter_id: Optional[int] = -1,
+        src_page_id: Optional[int] = -1,
         page_id: Optional[int] = -1,
+        book_slug: Optional[str] = None,
+        page_slug: Optional[str] = None,
     ) -> IResponse:
         """
         import the given text as a page.
@@ -352,7 +352,12 @@ class Importer():
         if error:
             return IResponse(error, msg)
         else:
-            return IResponse(SUCCESS, name)
+            if page_id == -1:
+                # page was created
+                page_id = int(msg)
+                self.remember_page(sq3, book_id, book_slug, src_page_id, page_id, page_slug)
+
+            return IResponse(SUCCESS, page_id)
 
 
     def import_page(
@@ -364,6 +369,8 @@ class Importer():
         chapter_id: Optional[int] = -1,
         src_page_id: Optional[int] = -1,
         page_id: Optional[int] = -1,
+        book_slug: Optional[str] = None,
+        page_slug: Optional[str] = None,
     ) -> IResponse:
         """
         Parse a Markdown file and import it as a page.
@@ -441,12 +448,10 @@ class Importer():
 
             # get the id of the attachment
             cursor = sq3.cursor()
-            print(target)
             cursor.execute("SELECT bs_att_id FROM attachments WHERE filename = ?", (filename,))
             row = cursor.fetchone()
             if row is not None:
                 bs_att_id = row[0]
-                print(bs_att_id)
                 text = text.replace(f'(../files/{target})', f'(/attachments/{bs_att_id})')
 
         if not name:
@@ -455,7 +460,7 @@ class Importer():
         if not tags:
             tags = None
 
-        return self.import_page_text(name, text, tags, book_id, chapter_id, page_id)
+        return self.import_page_text(sq3, name, text, tags, book_id, chapter_id, src_page_id, page_id, book_slug, page_slug)
 
 
     def import_chapter(
