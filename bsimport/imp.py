@@ -293,7 +293,11 @@ class Importer():
             if first_book_page_id is None:
 
                 error, msg = self.import_page(sq3, file_path, Path(import_path, "images", str(src_page_id)),
-                    book_id=bs_book_id, page_id=bs_page_id, src_page_id=src_page_id, page_slug=page_title)
+                    book_id=bs_book_id,
+                    page_id=bs_page_id,
+                    src_page_id=src_page_id,
+                    book_slug=bs_book_slug,
+                    page_slug=page_title)
                 if error:
                     return IResponse(error, msg)
                 bs_page_id = msg
