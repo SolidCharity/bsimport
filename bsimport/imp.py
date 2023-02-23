@@ -10,6 +10,7 @@ from bsimport.wrapper import Bookstack
 import sqlite3
 import MySQLdb
 import base64
+import hashlib
 import configparser
 
 
@@ -142,7 +143,8 @@ class Importer():
             bs_page_id INTEGER,
             bs_book_id INTEGER,
             bs_book_slug VARCHAR,
-            bs_page_slug VARCHAR)""")
+            bs_page_slug VARCHAR,
+            content_md5sum VARCHAR)""")
         sq3.execute("""
             CREATE TABLE IF NOT EXISTS attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -197,11 +199,30 @@ class Importer():
         return -1
 
 
-    def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, bs_page_id, bs_page_slug):
+    def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, bs_page_id, bs_page_slug, content):
         cursor = sq3.cursor()
-        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug) VALUES(?,?,?,?,?)",
-            (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug))
+        content_md5sum = hashlib.md5(content.encode('utf-8')).hexdigest()
+        print(f"{bs_page_id}", content_md5sum)
+        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug, content_md5sum) VALUES(?,?,?,?,?,?)",
+            (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug, content_md5sum))
         sq3.commit()
+
+
+    def check_for_new_content(self, sq3, bs_book_id, bs_page_id, content):
+        cursor = sq3.cursor()
+        content_md5sum = hashlib.md5(content.encode('utf-8')).hexdigest()
+        cursor.execute("SELECT content_md5sum FROM pages WHERE bs_book_id = ? AND bs_page_id = ?",
+            (bs_book_id,bs_page_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            if row[0] == content_md5sum:
+                return False
+            print(f"{bs_page_id}", content_md5sum)
+            cursor.execute("UPDATE pages SET content_md5sum = ? WHERE bs_book_id = ? AND bs_page_id = ?",
+                (content_md5sum, bs_book_id, bs_page_id,))
+            sq3.commit()
+
+        return True
 
 
     def import_attachments(
@@ -335,11 +356,13 @@ class Importer():
         :rtype: str
         """
 
+        error = False
         if page_id != -1:
-            # update existing page
-            error, msg = self._wrapper.update_page(
-                book_id, page_id, name, text, tags
-            )
+            if self.check_for_new_content(sq3, book_id, page_id, text):
+                # update existing page
+                error, msg = self._wrapper.update_page(
+                    book_id, page_id, name, text, tags
+                )
         elif book_id != -1:
             error, msg = self._wrapper.create_page(
                 name, text, tags, book_id=book_id
@@ -355,7 +378,7 @@ class Importer():
             if page_id == -1:
                 # page was created
                 page_id = int(msg)
-                self.remember_page(sq3, book_id, book_slug, src_page_id, page_id, page_slug)
+                self.remember_page(sq3, book_id, book_slug, src_page_id, page_id, page_slug, text)
 
             return IResponse(SUCCESS, page_id)
 
