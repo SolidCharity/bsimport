@@ -454,6 +454,29 @@ class Importer():
                 bs_att_id = row[0]
                 text = text.replace(f'(../files/{target})', f'(/attachments/{bs_att_id})')
 
+        # replace videos from vimeo; eg. [vimeo:123456789123456789:640:320]
+        pos = 0
+        while '[vimeo:' in text[pos:]:
+            pos += text[pos:].index('[vimeo:') + len('[vimeo:')
+            video = text[pos:]
+            video = video[0:video.index(']')]
+            video_id = video[0:video.index(':')]
+            video = video[len(video_id)+1:]
+            width = video[0:video.index(':')]
+            video = video[len(width)+1:]
+            height = video
+
+            video_iframe = f'<iframe src="https://player.vimeo.com/video/{video_id}?title=0&amp;byline=0&amp;portrait=0&amp;color=8dc7dc" width="{width}" height="{height}" allowfullscreen="allowfullscreen"></iframe>'
+            text = text.replace(f'[vimeo:{video_id}:{width}:{height}]', video_iframe)
+
+        # replace https links in brackets with proper links eg. (https://vimeo.com/123456789123456789)
+        pos = 0
+        while ' (https://' in text[pos:]:
+            pos += text[pos:].index(' (https://') + len(' (')
+            link = text[pos:]
+            link = link[0:link.index(')')]
+            text = text.replace(f' ({link})', f' ([{link}]({link}))')
+
         if not name:
             name = file_path.stem
 
