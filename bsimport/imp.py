@@ -140,6 +140,11 @@ class Importer():
             src_page_id INTEGER,
             bs_page_id INTEGER,
             bs_book_id INTEGER)""")
+        sq3.execute("""
+            CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename VARCHAR,
+            bs_page_id INTEGER)""")
         sq3.commit()
         return sq3
 
@@ -204,6 +209,7 @@ class Importer():
 
     def import_attachments(
         self,
+        sq3,
         path: Path,
         bs_page_id: int,
     ) -> IResponse:
@@ -216,11 +222,20 @@ class Importer():
 
         for child in path.iterdir():
             if child.is_file():
+                cursor = sq3.cursor()
+                cursor.execute("SELECT id FROM attachments WHERE filename = ? and bs_page_id = ?", (child.name,bs_page_id,))
+                row = cursor.fetchone()
+                if row is not None:
+                    continue
+
                 error, msg = self._wrapper.create_attachment(
                     child.name, child, bs_page_id)
 
                 if error:
                     return IResponse(error, msg)
+
+                cursor.execute("INSERT INTO attachments(filename, bs_page_id) VALUES(?,?)", (child.name,bs_page_id,))
+                sq3.commit()
 
         return IResponse(SUCCESS, "")
 
@@ -264,7 +279,7 @@ class Importer():
                 if error:
                     return IResponse(error, msg)
 
-                error, msg = self.import_attachments(Path(import_path, "files", str(src_page_id)), bs_page_id)
+                error, msg = self.import_attachments(sq3, Path(import_path, "files", str(src_page_id)), bs_page_id)
                 if error:
                     return IResponse(error, msg)
 
