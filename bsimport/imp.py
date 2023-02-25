@@ -74,7 +74,7 @@ class Importer():
                 end = count + 1
                 break
 
-            header += line + "\n"
+            header += "    " + line
 
             lc = line.split(':')
 
@@ -140,7 +140,7 @@ class Importer():
         text = ''.join(content[text_start:])
 
         if header:
-            text = '---\n' + header + '---\n' + text
+            text = '---\n' + header + '---\n\n' + text
 
         return name, text, tags
 
@@ -160,6 +160,7 @@ class Importer():
             bs_book_id INTEGER,
             bs_book_slug VARCHAR,
             bs_page_slug VARCHAR,
+            bs_page_title VARCHAR,
             content_md5sum VARCHAR)""")
         sq3.execute("""
             CREATE TABLE IF NOT EXISTS attachments (
@@ -215,12 +216,12 @@ class Importer():
         return -1
 
 
-    def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, bs_page_id, bs_page_slug, content):
+    def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, bs_page_id, bs_page_slug, bs_page_title, content):
         cursor = sq3.cursor()
         content_md5sum = hashlib.md5(content.encode('utf-8')).hexdigest()
         print(f"{bs_page_id}", content_md5sum)
-        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug, content_md5sum) VALUES(?,?,?,?,?,?)",
-            (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug, content_md5sum))
+        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug, bs_page_title, content_md5sum) VALUES(?,?,?,?,?,?,?)",
+            (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug,bs_page_title,content_md5sum))
         sq3.commit()
 
 
@@ -302,8 +303,6 @@ class Importer():
             # does this book already exist?
             (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, row[0])
 
-            page_title = file_path.stem
-
             bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
 
             if first_book_page_id is None:
@@ -312,8 +311,7 @@ class Importer():
                     book_id=bs_book_id,
                     page_id=bs_page_id,
                     src_page_id=src_page_id,
-                    book_slug=bs_book_slug,
-                    page_slug=page_title)
+                    book_slug=bs_book_slug)
                 if error:
                     return IResponse(error, msg)
                 bs_page_id = msg
@@ -324,14 +322,25 @@ class Importer():
                     return IResponse(error, msg)
 
             else:
+                # get details of original page
+                orig_page_slug = file_path.stem
+                orig_page_title = file_path.stem
+                cursor = sq3.cursor()
+                cursor.execute("SELECT bs_page_slug, bs_page_title FROM pages WHERE bs_page_id = ?", (first_book_page_id,))
+                row = cursor.fetchone()
+                if row is not None:
+                    orig_page_slug = row[0]
+                    orig_page_title = row[1]
+
+
                 # create a page with a reference
                 # see https://www.bookstackapp.com/docs/user/reusing-page-content/
-                error, msg = self.import_page_text(sq3, page_title, "{{@" + str(first_book_page_id) + "}}", None,
+                error, msg = self.import_page_text(sq3, orig_page_title, "{{@" + str(first_book_page_id) + "}}", None,
                     book_id=bs_book_id,
                     page_id=bs_page_id,
                     src_page_id = src_page_id,
                     book_slug = bs_book_slug,
-                    page_slug = page_title)
+                    page_slug = orig_page_slug)
                 if error:
                     return IResponse(error, msg)
 
@@ -398,7 +407,7 @@ class Importer():
             if page_id == -1:
                 # page was created
                 page_id = int(msg)
-                self.remember_page(sq3, book_id, book_slug, src_page_id, page_id, page_slug, text)
+                self.remember_page(sq3, book_id, book_slug, src_page_id, page_id, page_slug, name, text)
 
             return IResponse(SUCCESS, page_id)
 
@@ -414,7 +423,6 @@ class Importer():
         src_page_id: Optional[int] = -1,
         page_id: Optional[int] = -1,
         book_slug: Optional[str] = None,
-        page_slug: Optional[str] = None,
     ) -> IResponse:
         """
         Parse a Markdown file and import it as a page.
@@ -523,6 +531,9 @@ class Importer():
 
         if not name:
             name = file_path.stem
+
+        # calculate page slug from name
+        page_slug = name.lower().replace(' ', '-')
 
         if not tags:
             # load tags from mysql database
