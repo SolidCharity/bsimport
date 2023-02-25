@@ -45,6 +45,12 @@ class Importer():
         :type content: List[str]
 
         :return:
+            The title
+        :rtype: str
+        :return:
+            The header
+        :rtype: str
+        :return:
             The tags found, if any.
         :rtype: List[Dict[str, str]]
         :return:
@@ -59,6 +65,8 @@ class Importer():
             return tags, end
 
         tmp = []
+        header = ""
+        title = ""
 
         for count, line in enumerate(content[1:]):
             # Found the end of the front matter
@@ -66,11 +74,17 @@ class Importer():
                 end = count + 1
                 break
 
+            header += line + "\n"
+
             lc = line.split(':')
 
             # Improperly formatted or YAML list (not supported)
             if len(lc) == 1:
                 continue
+
+            if lc[0] == 'Title':
+                title = lc[1].strip()
+
             # Skip all other front matter content
             if lc[0] != 'tags':
                 continue
@@ -85,7 +99,7 @@ class Importer():
         for tag in tmp:
             tags.append({'name': tag})
 
-        return tags, end
+        return title, header, tags, end
 
     def _parse_file(
         self,
@@ -110,13 +124,12 @@ class Importer():
             The tags found, if any.
         :rtype: List[Dict[str, str]]
         """
-        tags, end = self._parse_front_matter(content)
+        name, header, tags, end = self._parse_front_matter(content)
         start = 0 if (end == -1) else (end + 1)
 
         text_start = -1
-        name = ""
         for count, line in enumerate(content[start:]):
-            if line.startswith('# '):
+            if not name and line.startswith('# '):
                 name = line.rstrip()
                 name = name.lstrip('# ')
             #if line.startswith('## ') and text_start == -1:
@@ -125,6 +138,9 @@ class Importer():
                 break
 
         text = ''.join(content[text_start:])
+
+        if header:
+            text = '---\n' + header + '---\n' + text
 
         return name, text, tags
 
