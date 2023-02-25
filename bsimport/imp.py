@@ -12,7 +12,7 @@ import MySQLdb
 import base64
 import hashlib
 import configparser
-
+import re
 
 class IResponse(NamedTuple):
     """
@@ -528,6 +528,15 @@ class Importer():
             link = text[pos:]
             link = link[0:link.index(')')]
             text = text.replace(f' ({link})', f' ([{link}]({link}))')
+
+
+        # enter a space after # characters at start of line
+        pos = 0
+        r = re.search("\n#+[^\s^#]", text[pos:])
+        while r:
+            text = text[:pos + r.start()] + text[pos + r.start():pos + r.end() - 1] + ' ' + text[pos + r.end() - 1:]
+            pos = r.end() + 1
+            r = re.search("\n#+[^\s]", text[pos:])
 
         if not name:
             name = file_path.stem
