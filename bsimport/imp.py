@@ -547,14 +547,14 @@ class Importer():
         if not tags:
             # load tags from mysql database
             c=mydb.cursor()
-            c.execute("""SELECT rt.name FROM resource_tag AS rt
+            c.execute("""SELECT rt.family, rt.name FROM resource_tag AS rt
                 JOIN resource_page_tag AS rpt on rpt.resource_tag_id = rt.id
                 WHERE rpt.resource_page_id = %s""", (src_page_id,))
             row = c.fetchone()
             first_book_page_id = None
             tags = []
             while row is not None:
-                tags.append({'name': row[0], 'value': row[0]})
+                tags.append({'name': row[0], 'value': row[1]})
                 row = c.fetchone()
 
         return self.import_page_text(sq3, name, text, tags, book_id, chapter_id, src_page_id, page_id, book_slug, page_slug)
