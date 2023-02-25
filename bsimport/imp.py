@@ -181,6 +181,18 @@ class Importer():
         return mydb
 
 
+    def first_page_of_book(self, mydb, src_book_id, src_page_id):
+        c=mydb.cursor()
+        c.execute("""SELECT resource_page_id FROM resource_book_page
+            WHERE resource_book_id = %s
+            ORDER BY display_order""", (src_book_id,))
+
+        row = c.fetchone()
+        if row is not None:
+            return row[0] == src_page_id
+
+        return False
+
     def get_or_create_book(self, sq3, src_book_id, page_title):
 
         cursor = sq3.cursor()
@@ -334,10 +346,12 @@ class Importer():
         first_book_page_id = None
         while row is not None:
 
-            page_title = self.parse_page_title(file_path)
-
             # does this book already exist?
-            (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, row[0], page_title)
+            src_book_id = row[0]
+            book_title = str(src_book_id)
+            if self.first_page_of_book(mydb, src_book_id, src_page_id):
+                book_title = self.parse_page_title(file_path)
+            (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, src_book_id, book_title)
 
             bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
 
