@@ -596,14 +596,17 @@ class Importer():
             link = link[0:link.index(')')]
             text = text.replace(f' ({link})', f' ([{link}]({link}))')
 
+        # fix some captions
+        text = text.replace('#### #', '#####')
 
         # enter a space after # characters at start of line
         pos = 0
-        r = re.search("\n#+[^\s^#]", text[pos:])
+        regex = "\n#+[^\s^#]"
+        r = re.search(regex, text[pos:])
         while r:
             text = text[:pos + r.start()] + text[pos + r.start():pos + r.end() - 1] + ' ' + text[pos + r.end() - 1:]
-            pos = r.end() + 1
-            r = re.search("\n#+[^\s]", text[pos:])
+            pos += r.end() + 1
+            r = re.search(regex, text[pos:])
 
         if not name:
             name = file_path.stem
