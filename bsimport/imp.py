@@ -218,7 +218,7 @@ class Importer():
     def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, bs_page_id, bs_page_slug, bs_page_title, content):
         cursor = sq3.cursor()
         content_md5sum = hashlib.md5(content.encode('utf-8')).hexdigest()
-        print(f"{bs_page_id}", content_md5sum)
+        # print(f"{bs_page_id}", content_md5sum)
         cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug, bs_page_title, content_md5sum) VALUES(?,?,?,?,?,?,?)",
             (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug,bs_page_title,content_md5sum))
         sq3.commit()
@@ -233,7 +233,7 @@ class Importer():
         if row is not None:
             if row[0] == content_md5sum:
                 return False
-            print(f"{bs_page_id}", content_md5sum)
+            # print(f"{bs_page_id}", content_md5sum)
             cursor.execute("UPDATE pages SET content_md5sum = ? WHERE bs_book_id = ? AND bs_page_id = ?",
                 (content_md5sum, bs_book_id, bs_page_id,))
             sq3.commit()
@@ -275,17 +275,53 @@ class Importer():
         return IResponse(SUCCESS, "")
 
 
+    def import_books(
+        self,
+        path: Path
+    ) -> IResponse:
+        """
+        use the table "resource_book_page" from the mysql database to walk through all books in the right order
+        and import the documents
+        """
+
+        mydb = self.connect_mysql()
+        sq3 = self.connect_sqlite()
+
+        # read all existing documents
+        pages = {}
+        for child in Path(path, "docs").iterdir():
+            if child.is_file() and child.suffix == '.md':
+                src_page_id = int(child.name[0:child.name.index('-')])
+                pages[src_page_id] = child
+
+        # get all documents per book and in the right order
+        c=mydb.cursor()
+        c.execute("""SELECT resource_page_id FROM resource_book_page
+            ORDER BY resource_book_id, display_order""")
+
+        row = c.fetchone()
+        while row is not None:
+            if row[0] in pages:
+                error, msg = self.import_doc(mydb, sq3, path, pages[row[0]])
+
+                if error:
+                    return IResponse(error, msg)
+
+            row = c.fetchone()
+
+        return IResponse(SUCCESS, "")
+
+
     def import_doc(
         self,
+        mydb,
+        sq3,
         import_path: Path,
         file_path: Path
     ) -> IResponse:
         """
         import a document, and get information from the source mysql database about which book this page belongs to
         """
-
-        mydb = self.connect_mysql()
-        sq3 = self.connect_sqlite()
 
         src_page_id = int(file_path.name[0:file_path.name.index('-')])
         print(src_page_id, file_path)
@@ -297,7 +333,6 @@ class Importer():
         row = c.fetchone()
         first_book_page_id = None
         while row is not None:
-            print(row)
 
             page_title = self.parse_page_title(file_path)
 

@@ -149,19 +149,16 @@ def import_custom(importer: imp.Importer, path: Path):
     :type path: Path
     """
 
-    # go through all docs
-    for child in Path(path, "docs").iterdir():
+    # go through all pages of all books
+    error, msg = importer.import_books(path)
 
-        if child.is_file() and child.suffix == '.md':
-            error, msg = importer.import_doc(path, child)
-
-            if error:
-                typer.secho(
-                    f"Import file failed with: {ERRORS[error]}",
-                    fg=typer.colors.RED
-                )
-                typer.secho(f"Debug: {msg}")
-                raise typer.Exit(error)
+    if error:
+        typer.secho(
+            f"Import file failed with: {ERRORS[error]}",
+            fg=typer.colors.RED
+        )
+        typer.secho(f"Debug: {msg}")
+        raise typer.Exit(error)
 
 
 def import_single_file(importer: imp.Importer, path: Path):
