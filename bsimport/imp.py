@@ -181,7 +181,7 @@ class Importer():
         return mydb
 
 
-    def get_or_create_book(self, sq3, src_book_id):
+    def get_or_create_book(self, sq3, src_book_id, page_title):
 
         cursor = sq3.cursor()
         cursor.execute("SELECT bs_id, bs_slug FROM books WHERE src_id = ?", (src_book_id,))
@@ -190,15 +190,14 @@ class Importer():
             return (row[0], row[1])
 
         # create a new book
-        # TODO: get the title of the book
-        error, data = self.create_book(str(src_book_id))
+        error, data = self.create_book(page_title)
 
         if error:
             print(f"Create book failed with: {error}")
             raise Exception(error)
 
         bs_id = data
-        bs_slug = str(src_book_id)
+        bs_slug = page_title.lower().replace(' ', '-')
 
         cursor.execute("INSERT INTO books(src_id, bs_id, bs_slug) VALUES(?,?,?)", (src_book_id,bs_id,bs_slug,))
         sq3.commit()
@@ -300,8 +299,10 @@ class Importer():
         while row is not None:
             print(row)
 
+            page_title = self.parse_page_title(file_path)
+
             # does this book already exist?
-            (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, row[0])
+            (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, row[0], page_title)
 
             bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
 
@@ -411,6 +412,23 @@ class Importer():
 
             return IResponse(SUCCESS, page_id)
 
+
+    def parse_page_title(
+        self,
+        file_path: Path
+    ):
+        try:
+            with file_path.open('r') as file:
+                content = file.readlines()
+        except OSError:
+            return IResponse(FILE_READ_ERROR, "")
+
+        if len(content) == 0:
+            return IResponse(EMPTY_FILE_ERROR, "")
+
+        title, text, tags = self._parse_file(content)
+
+        return title
 
     def import_page(
         self,
