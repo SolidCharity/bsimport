@@ -285,6 +285,9 @@ class Bookstack():
         fh = open(file_path, 'rb')
         content = bytearray(fh.read())
 
+        if len(content) > 50*1000*1000:
+            return BResponse(REQUEST_ERROR, f'file {name} too big: {len(content)/1000/1000} MB')
+
         url = f"{self._url}/attachments"
         data = {
             'name': name,
@@ -295,7 +298,15 @@ class Bookstack():
         # see https://github.com/BookStackApp/BookStack/blob/development/app/Http/Controllers/Api/AttachmentApiController.php#L44
         response = requests.post(url, files=file, data=data, headers=self._header)
 
-        j = response.json()
+        try:
+          j = response.json()
+        except:
+          print(url)
+          print(name)
+          print(data)
+          print(len(content))
+          print(response.content)
+          raise Exception("problem creating attachment")
         if response.status_code == requests.codes.ok:
             id = j.get('id', -1)
             return BResponse(SUCCESS, id)

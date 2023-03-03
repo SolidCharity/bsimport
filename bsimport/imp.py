@@ -278,6 +278,8 @@ class Importer():
                     child.name, child, bs_page_id)
 
                 if error:
+                    print(data)
+                    continue
                     return IResponse(error, data)
 
                 bs_att_id = data
