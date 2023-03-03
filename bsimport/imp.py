@@ -351,6 +351,10 @@ class Importer():
             book_title = str(src_book_id)
             if self.first_page_of_book(mydb, src_book_id, src_page_id):
                 book_title = self.parse_page_title(file_path)
+            else:
+                # wait until we have the first page of this book
+                row = c.fetchone()
+                continue
             (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, src_book_id, book_title)
 
             bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
