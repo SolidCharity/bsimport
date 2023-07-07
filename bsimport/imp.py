@@ -193,13 +193,31 @@ class Importer():
 
         return False
 
-    def get_or_create_book(self, sq3, src_book_id, page_title):
+
+    def has_book(self, sq3, src_book_id):
+
+        cursor = sq3.cursor()
+        cursor.execute("SELECT bs_id, bs_slug FROM books WHERE src_id = ?", (src_book_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            return True
+
+        return False
+
+
+
+    def get_book(self, sq3, src_book_id):
 
         cursor = sq3.cursor()
         cursor.execute("SELECT bs_id, bs_slug FROM books WHERE src_id = ?", (src_book_id,))
         row = cursor.fetchone()
         if row is not None:
             return (row[0], row[1])
+
+        return None
+
+
+    def create_book(self, sq3, src_book_id, page_title):
 
         # create a new book
         error, data = self.create_book(page_title)
@@ -343,7 +361,6 @@ class Importer():
         c=mydb.cursor()
         c.execute("""SELECT resource_book_id FROM resource_book_page
             WHERE resource_page_id = %s""", (src_page_id,))
-
         row = c.fetchone()
         first_book_page_id = None
         while row is not None:
@@ -351,13 +368,19 @@ class Importer():
             # does this book already exist?
             src_book_id = row[0]
             book_title = str(src_book_id)
-            if self.first_page_of_book(mydb, src_book_id, src_page_id):
-                book_title = self.parse_page_title(file_path)
+            if not self.has_book(sq3, src_book_id):
+                if self.first_page_of_book(mydb, src_book_id, src_page_id):
+                    book_title = self.parse_page_title(file_path)
+                    (bs_book_id,bs_book_slug) = self.create_book(sq3, src_book_id, book_title)
+                else:
+                   # wait until we have the first page of this book
+                   print("wait until we have the first page of this book")
+                   row = c.fetchone()
+                   continue
+
             else:
-                # wait until we have the first page of this book
-                row = c.fetchone()
-                continue
-            (bs_book_id,bs_book_slug) = self.get_or_create_book(sq3, src_book_id, book_title)
+                (bs_book_id,bs_book_slug) = self.get_book(sq3, src_book_id)
+
 
             bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
 
