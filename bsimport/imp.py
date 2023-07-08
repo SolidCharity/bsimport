@@ -156,6 +156,7 @@ class Importer():
             CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             src_page_id INTEGER,
+            is_original_page INTEGER,
             bs_page_id INTEGER,
             bs_book_id INTEGER,
             bs_book_slug VARCHAR,
@@ -181,17 +182,39 @@ class Importer():
         return mydb
 
 
-    def first_page_of_book(self, mydb, src_book_id, src_page_id):
+    def is_page_a_book(self, mydb, src_page_id):
         c=mydb.cursor()
+
+        # is there a book that has the same id as this page?
         c.execute("""SELECT resource_page_id FROM resource_book_page
-            WHERE resource_book_id = %s
+            WHERE resource_book_id = %s""", (src_page_id,))
+        row = c.fetchone()
+        if row is not None:
+            return True
+
+        return False
+
+
+    def get_first_page_of_book(self, mydb, src_book_id):
+        c=mydb.cursor()
+
+        # do we have a page that has the same id as the book?
+        c.execute("""SELECT resource_page_id FROM resource_book_page
+            WHERE resource_page_id = %s""", (src_book_id,))
+        row = c.fetchone()
+        if row is not None:
+            return src_book_id
+
+        # get the first page of this book, that is not the first page of its own book
+        c.execute("""SELECT resource_page_id FROM resource_book_page r1
+            WHERE r1.resource_book_id = %s AND NOT EXISTS(SELECT * FROM resource_book_page r2 WHERE r2.resource_page_id = r1.resource_page_id AND r2.resource_book_id = r1.resource_page_id)
             ORDER BY display_order""", (src_book_id,))
 
         row = c.fetchone()
         if row is not None:
-            return row[0] == src_page_id
+            return row[0]
 
-        return False
+        return None
 
 
     def has_book(self, sq3, src_book_id):
@@ -212,6 +235,7 @@ class Importer():
         cursor.execute("SELECT bs_id, bs_slug FROM books WHERE src_id = ?", (src_book_id,))
         row = cursor.fetchone()
         if row is not None:
+            #print(f" book id and slug {row[0]} {row[1]}")
             return (row[0], row[1])
 
         return None
@@ -236,6 +260,16 @@ class Importer():
         return (bs_id, bs_slug)
 
 
+    def get_original_book(self, sq3, src_page_id):
+        cursor = sq3.cursor()
+        cursor.execute("SELECT bs_book_id FROM pages WHERE src_page_id = ? AND is_original_page = 1", (src_page_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            return row[0]
+
+        return -1
+
+
     def get_page(self, sq3, bs_book_id, src_page_id):
         cursor = sq3.cursor()
         cursor.execute("SELECT bs_page_id FROM pages WHERE src_page_id = ? AND bs_book_id = ?", (src_page_id, bs_book_id))
@@ -246,12 +280,12 @@ class Importer():
         return -1
 
 
-    def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, bs_page_id, bs_page_slug, bs_page_title, content):
+    def remember_page(self, sq3, bs_book_id, bs_book_slug, src_page_id, is_original_page, bs_page_id, bs_page_slug, bs_page_title, content):
         cursor = sq3.cursor()
         content_md5sum = hashlib.md5(content.encode('utf-8')).hexdigest()
         # print(f"{bs_page_id}", content_md5sum)
-        cursor.execute("INSERT INTO pages(src_page_id, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug, bs_page_title, content_md5sum) VALUES(?,?,?,?,?,?,?)",
-            (src_page_id,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug,bs_page_title,content_md5sum))
+        cursor.execute("INSERT INTO pages(src_page_id, is_original_page, bs_page_id, bs_book_id, bs_book_slug, bs_page_slug, bs_page_title, content_md5sum) VALUES(?,?,?,?,?,?,?,?)",
+            (src_page_id,is_original_page,bs_page_id,bs_book_id,bs_book_slug,bs_page_slug,bs_page_title,content_md5sum))
         sq3.commit()
 
 
@@ -326,23 +360,47 @@ class Importer():
             if child.is_file() and child.suffix == '.md':
                 src_page_id = int(child.name[0:child.name.index('-')])
                 pages[src_page_id] = child
+        referenced_pages = {}
+
+        # get all books
+        c=mydb.cursor()
+        c.execute("""SELECT DISTINCT resource_book_id FROM resource_book_page
+            ORDER BY resource_book_id""")
+        row = c.fetchone()
+        while row is not None:
+            src_book_id = row[0]
+            src_page_id = self.get_first_page_of_book(mydb, src_book_id)
+            file_path = pages[src_page_id]
+            if not self.has_book(sq3, src_book_id):
+                book_title = self.parse_page_title(file_path)
+                print(f"creating book {src_book_id} with title '{book_title}' and first page {src_page_id}...")
+                (bs_book_id,bs_book_slug) = self.create_book_sq3(sq3, src_book_id, book_title)
+
+            # now insert or update the first page
+            referenced_pages[src_page_id] = True
+            error, msg = self.import_doc(mydb, sq3, src_book_id, src_page_id, path, file_path)
+
+            row = c.fetchone()
 
         # get all documents per book and in the right order
         c=mydb.cursor()
-        c.execute("""SELECT resource_page_id FROM resource_book_page
+        c.execute("""SELECT resource_book_id, resource_page_id FROM resource_book_page
             ORDER BY resource_book_id, display_order""")
 
-        referenced_pages = {}
         row = c.fetchone()
         while row is not None:
-            if row[0] in pages:
-                referenced_pages[row[0]] = True
-                error, msg = self.import_doc(mydb, sq3, path, pages[row[0]])
+            src_book_id = row[0]
+            src_page_id = row[1]
+            if src_page_id in pages:
+                file_path = pages[src_page_id]
+                referenced_pages[src_page_id] = True
+                error, msg = self.import_doc(mydb, sq3, src_book_id, src_page_id, path, file_path)
 
                 if error:
                     return IResponse(error, msg)
 
             row = c.fetchone()
+        exit(-1)
 
         # check for unreferenced pages
         for page in pages:
@@ -356,44 +414,30 @@ class Importer():
         self,
         mydb,
         sq3,
+        src_book_id,
+        src_page_id,
         import_path: Path,
         file_path: Path
     ) -> IResponse:
         """
-        import a document, and get information from the source mysql database about which book this page belongs to
+        import a document
         """
 
-        src_page_id = int(file_path.name[0:file_path.name.index('-')])
-        print(src_page_id, file_path)
+        print(src_book_id, src_page_id, file_path)
 
-        c=mydb.cursor()
-        c.execute("""SELECT resource_book_id FROM resource_book_page
-            WHERE resource_page_id = %s""", (src_page_id,))
-        row = c.fetchone()
-        first_book_page_id = None
-        while row is not None:
+        # get the current book
+        (bs_book_id,bs_book_slug) = self.get_book(sq3, src_book_id)
 
-            # does this book already exist?
-            src_book_id = row[0]
-            book_title = str(src_book_id)
-            if not self.has_book(sq3, src_book_id):
-                if self.first_page_of_book(mydb, src_book_id, src_page_id):
-                    book_title = self.parse_page_title(file_path)
-                    (bs_book_id,bs_book_slug) = self.create_book_sq3(sq3, src_book_id, book_title)
-                else:
-                   # wait until we have the first page of this book
-                   print("wait until we have the first page of this book")
-                   row = c.fetchone()
-                   continue
+        # has the page already been imported into this book
+        bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
 
-            else:
-                (bs_book_id,bs_book_slug) = self.get_book(sq3, src_book_id)
+        # what is the original book for this page
+        orig_book_id = self.get_original_book(sq3, src_page_id)
 
+        if orig_book_id == -1 or orig_book_id == bs_book_id:
 
-            bs_page_id = self.get_page(sq3, bs_book_id, src_page_id)
-
-            if first_book_page_id is None:
-
+                # add this page as original to this book
+                # print("add page as original")
                 error, msg = self.import_page(mydb, sq3, file_path, Path(import_path, "images", str(src_page_id)),
                     book_id=bs_book_id,
                     page_id=bs_page_id,
@@ -402,27 +446,27 @@ class Importer():
                 if error:
                     return IResponse(error, msg)
                 bs_page_id = msg
-                first_book_page_id = bs_page_id
 
                 error, msg = self.import_attachments(sq3, Path(import_path, "files", str(src_page_id)), bs_page_id)
                 if error:
                     return IResponse(error, msg)
 
-            else:
+        else:
                 # get details of original page
+                # print("add page as reference")
+                orig_page_id = self.get_page(sq3, orig_book_id, src_page_id)
                 orig_page_slug = file_path.stem
                 orig_page_title = file_path.stem
                 cursor = sq3.cursor()
-                cursor.execute("SELECT bs_page_slug, bs_page_title FROM pages WHERE bs_page_id = ?", (first_book_page_id,))
+                cursor.execute("SELECT bs_page_slug, bs_page_title FROM pages WHERE bs_page_id = ?", (orig_page_id,))
                 row = cursor.fetchone()
                 if row is not None:
                     orig_page_slug = row[0]
                     orig_page_title = row[1]
 
-
                 # create a page with a reference
                 # see https://www.bookstackapp.com/docs/user/reusing-page-content/
-                error, msg = self.import_page_text(sq3, orig_page_title, "{{@" + str(first_book_page_id) + "}}", None,
+                error, msg = self.import_page_text(sq3, orig_page_title, "{{@" + str(orig_page_id) + "}}", 0,
                     book_id=bs_book_id,
                     page_id=bs_page_id,
                     src_page_id = src_page_id,
@@ -431,8 +475,6 @@ class Importer():
                 if error:
                     return IResponse(error, msg)
 
-            row = c.fetchone()
-
         return IResponse(SUCCESS, "")
 
     def import_page_text(
@@ -440,6 +482,7 @@ class Importer():
         sq3,
         name: str,
         text: str,
+        is_original: int,
         tags: Optional[List[Dict[str, str]]] = None,
         book_id: Optional[int] = -1,
         chapter_id: Optional[int] = -1,
@@ -494,7 +537,7 @@ class Importer():
             if page_id == -1:
                 # page was created
                 page_id = int(msg)
-                self.remember_page(sq3, book_id, book_slug, src_page_id, page_id, page_slug, name, text)
+                self.remember_page(sq3, book_id, book_slug, src_page_id, is_original, page_id, page_slug, name, text)
 
             return IResponse(SUCCESS, page_id)
 
@@ -562,6 +605,7 @@ class Importer():
             return IResponse(EMPTY_FILE_ERROR, "")
 
         name, text, tags = self._parse_file(content)
+        print(name)
 
         # embed images
         # Any images included via base64 data URIs will be extracted and saved as gallery images against the page during upload.
@@ -667,7 +711,7 @@ class Importer():
                 tags.append({'name': row[0], 'value': row[1]})
                 row = c.fetchone()
 
-        return self.import_page_text(sq3, name, text, tags, book_id, chapter_id, src_page_id, page_id, book_slug, page_slug)
+        return self.import_page_text(sq3, name, text, 1, tags, book_id, chapter_id, src_page_id, page_id, book_slug, page_slug)
 
 
     def import_chapter(
