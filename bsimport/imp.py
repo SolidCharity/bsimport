@@ -331,15 +331,22 @@ class Importer():
         c.execute("""SELECT resource_page_id FROM resource_book_page
             ORDER BY resource_book_id, display_order""")
 
+        referenced_pages = {}
         row = c.fetchone()
         while row is not None:
             if row[0] in pages:
+                referenced_pages[row[0]] = True
                 error, msg = self.import_doc(mydb, sq3, path, pages[row[0]])
 
                 if error:
                     return IResponse(error, msg)
 
             row = c.fetchone()
+
+        # check for unreferenced pages
+        for page in pages:
+            if page not in referenced_pages:
+                print(f"missing page in resource_book_page: {page}")
 
         return IResponse(SUCCESS, "")
 
