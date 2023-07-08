@@ -189,7 +189,13 @@ class Bookstack():
 
         response = requests.post(url, json=page, headers=self._header)
 
-        j = response.json()
+        try:
+            j = response.json()
+        except:
+            print(f"problem creating the page {name}")
+            print(response.text)
+            print(response)
+            exit(-1)
         if response.status_code == requests.codes.ok:
             id = j.get('id', -1)
             return BResponse(SUCCESS, id)
@@ -218,7 +224,13 @@ class Bookstack():
 
         response = requests.put(url, data=data, headers=self._header)
 
-        j = response.json()
+        try:
+            j = response.json()
+        except:
+            print(f"problem updating the page {page_id} {name}")
+            print(response.text)
+            print(response)
+            exit(-1)
         if response.status_code == requests.codes.ok:
             id = j.get('id', -1)
             return BResponse(SUCCESS, id)
@@ -301,12 +313,13 @@ class Bookstack():
         try:
           j = response.json()
         except:
+          print(f"problem creating attachment {name} at {file_path} for page {page_id}")
           print(url)
           print(name)
           print(data)
           print(len(content))
           print(response.content)
-          raise Exception("problem creating attachment")
+          exit(-1)
         if response.status_code == requests.codes.ok:
             id = j.get('id', -1)
             return BResponse(SUCCESS, id)
