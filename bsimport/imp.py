@@ -217,7 +217,7 @@ class Importer():
         return None
 
 
-    def create_book(self, sq3, src_book_id, page_title):
+    def create_book_sq3(self, sq3, src_book_id, page_title):
 
         # create a new book
         error, data = self.create_book(page_title)
@@ -229,6 +229,7 @@ class Importer():
         bs_id = data
         bs_slug = page_title.lower().replace(' ', '-')
 
+        cursor = sq3.cursor()
         cursor.execute("INSERT INTO books(src_id, bs_id, bs_slug) VALUES(?,?,?)", (src_book_id,bs_id,bs_slug,))
         sq3.commit()
 
@@ -378,7 +379,7 @@ class Importer():
             if not self.has_book(sq3, src_book_id):
                 if self.first_page_of_book(mydb, src_book_id, src_page_id):
                     book_title = self.parse_page_title(file_path)
-                    (bs_book_id,bs_book_slug) = self.create_book(sq3, src_book_id, book_title)
+                    (bs_book_id,bs_book_slug) = self.create_book_sq3(sq3, src_book_id, book_title)
                 else:
                    # wait until we have the first page of this book
                    print("wait until we have the first page of this book")
