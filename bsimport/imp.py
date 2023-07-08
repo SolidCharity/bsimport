@@ -602,6 +602,9 @@ class Importer():
                 bs_att_id = row[0]
                 text = text.replace(f'(../files/{target})', f'(/attachments/{bs_att_id})')
 
+        # fix list of attachments
+        text = text.replace(")* [", ")\n* [")
+
         # replace videos from vimeo; eg. [vimeo:123456789123456789:640:320]
         pos = 0
         while '[vimeo:' in text[pos:]:
