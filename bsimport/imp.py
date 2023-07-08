@@ -251,7 +251,7 @@ class Importer():
             raise Exception(error)
 
         bs_id = data
-        bs_slug = page_title.lower().replace(' ', '-')
+        bs_slug = page_title.lower().replace(' ', '-').replace('+', '')
 
         cursor = sq3.cursor()
         cursor.execute("INSERT INTO books(src_id, bs_id, bs_slug) VALUES(?,?,?)", (src_book_id,bs_id,bs_slug,))
@@ -696,7 +696,7 @@ class Importer():
             name = file_path.stem
 
         # calculate page slug from name
-        page_slug = name.lower().replace(' ', '-')
+        page_slug = name.lower().replace(' ', '-').replace('+', '')
 
         if not tags:
             # load tags from mysql database
